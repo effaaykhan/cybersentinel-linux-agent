@@ -1,6 +1,17 @@
 # CyberSentinel DLP - Linux Agent
 
-Enterprise endpoint DLP agent for Linux systems.
+🛡️ **Enterprise Data Loss Prevention Endpoint Agent for Linux**
+
+[![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](https://www.linux.org/)
+[![Python](https://img.shields.io/badge/python-3.8+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/effaaykhan/cybersentinel-linux-agent?style=social)](https://github.com/effaaykhan/cybersentinel-linux-agent/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/effaaykhan/cybersentinel-linux-agent)](https://github.com/effaaykhan/cybersentinel-linux-agent/issues)
+[![GitHub last commit](https://img.shields.io/github/last-commit/effaaykhan/cybersentinel-linux-agent)](https://github.com/effaaykhan/cybersentinel-linux-agent/commits/main)
+
+![Status](https://img.shields.io/badge/status-production--ready-brightgreen)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Maintenance](https://img.shields.io/badge/maintenance-active-brightgreen)
 
 ## Features
 

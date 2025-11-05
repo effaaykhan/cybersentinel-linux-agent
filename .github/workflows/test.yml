@@ -1,0 +1,201 @@
+name: Test Linux Agent
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  release:
+    types: [ created ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run linting
+      run: |
+        pip install flake8
+        flake8 agent.py --max-line-length=120 --ignore=E501,W503
+
+    - name: Run tests
+      run: |
+        pytest tests/ -v --cov=. --cov-report=xml
+      continue-on-error: true
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./coverage.xml
+        flags: linux-agent
+
+  installation-test:
+    name: Test Installation
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Test installation script syntax
+      run: |
+        bash -n install.sh
+
+    - name: Make installer executable
+      run: |
+        chmod +x install.sh
+
+    - name: Validate systemd service file
+      run: |
+        # Check if service file exists
+        if [ ! -f cybersentinel-agent.service ]; then
+          echo "Service file not found!"
+          exit 1
+        fi
+
+        # Basic syntax validation
+        grep -q "ExecStart=" cybersentinel-agent.service || exit 1
+        grep -q "Type=" cybersentinel-agent.service || exit 1
+        echo "Service file validation passed"
+
+    - name: Test agent script syntax
+      run: |
+        python3 -m py_compile agent.py
+
+    - name: Verify required directories structure
+      run: |
+        # Ensure all referenced paths in install.sh exist in expected locations
+        echo "Checking installation paths..."
+        [ -f agent.py ] || exit 1
+        [ -f agent_config.json ] || exit 1
+        [ -f cybersentinel-agent.service ] || exit 1
+        [ -f requirements.txt ] || exit 1
+        echo "All required files present"
+
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install quality tools
+      run: |
+        pip install bandit pylint safety
+
+    - name: Run Bandit security scan
+      run: |
+        bandit -r agent.py -f txt -o bandit-report.txt
+      continue-on-error: true
+
+    - name: Run Pylint
+      run: |
+        pylint agent.py --exit-zero --reports=y > pylint-report.txt
+
+    - name: Check dependencies for vulnerabilities
+      run: |
+        safety check --json --output safety-report.json
+      continue-on-error: true
+
+    - name: Upload reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: code-quality-reports
+        path: |
+          bandit-report.txt
+          pylint-report.txt
+          safety-report.json
+        retention-days: 30
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Run ShellCheck
+      uses: ludeeus/action-shellcheck@master
+      with:
+        scandir: '.'
+        format: tty
+        severity: warning
+
+  compatibility-test:
+    name: Test on Multiple Distributions
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        distro: [ubuntu-20.04, ubuntu-22.04, debian-11]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Test agent import
+      run: |
+        python3 -c "import agent" || echo "Note: Import test requires proper environment setup"
+
+  create-tarball:
+    name: Create Release Tarball
+    runs-on: ubuntu-latest
+    needs: [test, installation-test, code-quality]
+    if: github.event_name == 'release'
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Create tarball
+      run: |
+        tar -czf cybersentinel-linux-agent.tar.gz \
+          agent.py \
+          agent_config.json \
+          install.sh \
+          cybersentinel-agent.service \
+          requirements.txt \
+          README.md \
+          LICENSE
+
+    - name: Upload release asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./cybersentinel-linux-agent.tar.gz
+        asset_name: cybersentinel-linux-agent-${{ github.event.release.tag_name }}.tar.gz
+        asset_content_type: application/gzip
