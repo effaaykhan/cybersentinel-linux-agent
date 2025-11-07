@@ -22,11 +22,22 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 # Configure logging
+# Try /var/log first, fall back to local directory if not writable
+log_file = '/var/log/cybersentinel_agent.log'
+try:
+    # Test if we can write to /var/log
+    test_file = open(log_file, 'a')
+    test_file.close()
+except (PermissionError, OSError):
+    # Fall back to local directory
+    import os
+    log_file = os.path.join(os.path.dirname(__file__), 'cybersentinel_agent.log')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/var/log/cybersentinel_agent.log'),
+        logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )
@@ -100,8 +111,12 @@ class FileMonitorHandler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent):
         """Handle file creation"""
+        logger.info(f"File created event detected: {event.src_path}, is_directory: {event.is_directory}")
         if not event.is_directory and self._should_monitor(event.src_path):
+            logger.info(f"Processing file creation event: {event.src_path}")
             self.agent.handle_file_event("file_created", event.src_path)
+        else:
+            logger.debug(f"Skipping event: is_directory={event.is_directory}, should_monitor={self._should_monitor(event.src_path) if not event.is_directory else False}")
 
     def on_modified(self, event: FileSystemEvent):
         """Handle file modification"""
@@ -119,12 +134,15 @@ class FileMonitorHandler(FileSystemEventHandler):
         exclude_paths = self.agent.config.get("monitoring", {}).get("exclude_paths", [])
         for exclude in exclude_paths:
             if file_path.startswith(exclude.replace("*", "")):
+                logger.debug(f"File excluded by path pattern: {file_path} matches {exclude}")
                 return False
 
         # Check extensions
         ext = Path(file_path).suffix.lower()
         monitored_exts = self.agent.config.get("monitoring", {}).get("file_extensions", [])
-        return ext in monitored_exts if monitored_exts else True
+        should_monitor = ext in monitored_exts if monitored_exts else True
+        logger.debug(f"File monitoring check: {file_path}, ext={ext}, monitored_exts={monitored_exts}, should_monitor={should_monitor}")
+        return should_monitor
 
 
 class DLPAgent:
@@ -195,9 +213,10 @@ class DLPAgent:
             }
 
             response = requests.post(
-                f"{self.server_url}/agents",
+                f"{self.server_url}/agents/",
                 json=data,
-                timeout=10
+                timeout=10,
+                allow_redirects=True
             )
 
             if response.status_code in [200, 201]:
@@ -225,6 +244,7 @@ class DLPAgent:
 
     def handle_file_event(self, event_type: str, file_path: str):
         """Handle file system event"""
+        logger.info(f"Handling file event: {event_type} for {file_path}")
         try:
             # Get file info
             file_size = os.path.getsize(file_path)
@@ -267,10 +287,11 @@ class DLPAgent:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+            logger.info(f"Sending event to server: {event_data.get('event_id')}, severity: {event_data.get('severity')}")
             self.send_event(event_data)
 
         except Exception as e:
-            logger.error(f"Error handling file event: {e}")
+            logger.error(f"Error handling file event: {e}", exc_info=True)
 
     def _classify_content(self, content: str) -> Dict[str, Any]:
         """Classify content for sensitive data"""
@@ -335,15 +356,15 @@ class DLPAgent:
         """Send event to server"""
         try:
             response = requests.post(
-                f"{self.server_url}/events",
+                f"{self.server_url}/events/",  # Use trailing slash to match route
                 json=event_data,
                 timeout=10
             )
 
             if response.status_code in [200, 201]:
-                logger.debug("Event sent successfully")
+                logger.info(f"Event sent successfully: {event_data.get('event_id')}")
             else:
-                logger.warning(f"Failed to send event: {response.status_code}")
+                logger.warning(f"Failed to send event: {response.status_code}, response: {response.text}")
 
         except Exception as e:
             logger.error(f"Error sending event: {e}")
